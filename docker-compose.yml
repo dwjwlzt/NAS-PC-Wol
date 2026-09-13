@@ -1,0 +1,6 @@
+services:
+  wol-mqtt:
+    build: .
+    container_name: wol-mqtt
+    restart: unless-stopped
+    network_mode: host

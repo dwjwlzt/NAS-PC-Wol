@@ -1,0 +1,9 @@
+HOST = "mqtt.bemfa.com"
+PORT = 9501
+CLIENT_ID = "在这里填你的CLIENT_ID"
+TOPIC = "在这里填你的TOPIC"
+MAC_ADDR = "在这里填你的MAC地址，如 AA:BB:CC:DD:EE:FF"
+BROADCAST_IP = "在这里填广播IP，如 192.168.1.255"
+PC_IP = "在这里填目标电脑IP"
+PC_USER = "在这里填用户名"
+PC_PASS = "在这里填密码"
