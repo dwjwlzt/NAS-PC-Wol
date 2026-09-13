@@ -11,11 +11,12 @@
 
 | 文件 | 作用 |
 |------|------|
-| `wol.py` | 主程序，MQTT 订阅 + WOL 唤醒 + Samba 关机 |
-| `config.py` | 配置文件（含敏感信息，**不会上传到仓库**，需自行创建） |
-| `config.example.py` | 配置模板（克隆仓库后复制为 `config.py` 并填入自己的配置） |
-| `Dockerfile` | Docker 镜像构建文件（基于 python:3.12-slim + samba） |
-| `docker-compose.yml` | Compose 部署配置 |
+| `wol.py` | 主程序：连接巴法云 MQTT 服务器并订阅指令；收到 `on` 发送 WOL 魔术包唤醒电脑，收到 `off` 调用 Samba 远程关机 |
+| `config.py` | 真实配置文件：存放巴法云私钥、设备名、MAC 地址、广播 IP、电脑用户名密码等。**被 .gitignore 忽略，不会上传到仓库**，需自行创建 |
+| `config.example.py` | 配置模板：克隆仓库后复制为 `config.py` 并填入自己的配置即可使用 |
+| `Dockerfile` | Docker 镜像构建文件：基于 `python:3.12-slim`，安装 `samba`（提供 `net rpc shutdown` 关机命令）和 `paho-mqtt`（MQTT 客户端库） |
+| `docker-compose.yml` | Docker Compose 编排文件：使用 `host` 网络模式（才能发送广播包唤醒电脑），容器异常退出时自动重启 |
+| `.gitignore` | Git 忽略规则：忽略 `config.py`（防止密钥泄露）和 `__pycache__/`、`.pyc` 等 Python 缓存文件 |
 
 ## 配置方法
 
@@ -112,11 +113,12 @@ ipconfig /all
 
 ### 2.2 上传文件
 
-把三个文件上传到 NAS 同一个目录，例如 `/docker/nas-pcwol/`：
+先在本地把 `config.example.py` 复制为 `config.py` 并填入真实配置，然后把四个文件上传到 NAS 同一个目录，例如 `/docker/nas-pcwol/`：
 
 ```
 /docker/nas-pcwol/
 ├── wol.py
+├── config.py
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -125,7 +127,7 @@ ipconfig /all
 
 ```bash
 cd /你的/docker/nas-pcwol/
-chmod 644 Dockerfile docker-compose.yml wol.py
+chmod 644 Dockerfile docker-compose.yml wol.py config.py
 chmod 755 .
 ```
 
