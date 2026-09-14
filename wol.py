@@ -1,17 +1,23 @@
 import paho.mqtt.client as mqtt
 import socket
 import subprocess
-
 from config import *
 
 def wake_on_lan(mac):
     mac_clean = mac.replace(":", "").replace("-", "")
-    mac_bytes = bytes.fromhex(mac_clean)
+    try:
+        mac_bytes = bytes.fromhex(mac_clean)
+    except ValueError:
+        print(f"❌ MAC 地址格式无效: {mac}")
+        return
     magic_packet = b'\xff' * 6 + mac_bytes * 16
     print(f"📤 发送魔术包 -> MAC:{mac} 广播:{BROADCAST_IP}:9")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        s.sendto(magic_packet, (BROADCAST_IP, 9))
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(magic_packet, (BROADCAST_IP, 9))
+    except Exception as e:
+        print(f"❌ 发送魔术包失败: {e}")
 
 def remote_shutdown():
     print(f"📤 远程关机 -> {PC_IP}")
