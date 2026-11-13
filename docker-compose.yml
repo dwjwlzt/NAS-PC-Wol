@@ -4,3 +4,5 @@ services:
     container_name: wol-mqtt
     restart: unless-stopped
     network_mode: host
+    volumes:
+      - ./config.py:/app/config.py:ro

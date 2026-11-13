@@ -15,7 +15,7 @@
 | `config.py` | 真实配置文件：存放巴法云私钥、设备名、MAC 地址、广播 IP、电脑用户名密码等。**被 .gitignore 忽略，不会上传到仓库**，需自行创建 |
 | `config.example.py` | 配置模板：克隆仓库后复制为 `config.py` 并填入自己的配置即可使用 |
 | `Dockerfile` | Docker 镜像构建文件：基于 `python:3.12-slim`，安装 `samba`（提供 `net rpc shutdown` 关机命令）和 `paho-mqtt`（MQTT 客户端库） |
-| `docker-compose.yml` | Docker Compose 编排文件：使用 `host` 网络模式（才能发送广播包唤醒电脑），容器异常退出时自动重启 |
+| `docker-compose.yml` | Docker Compose 编排文件：使用 `host` 网络模式（才能发送广播包唤醒电脑），容器异常退出时自动重启；同时把 `config.py` 以只读方式挂载进容器，改配置后只需 `restart`，不必重新构建镜像 |
 | `.gitignore` | Git 忽略规则：忽略 `config.py`（防止密钥泄露）和 `__pycache__/`、`.pyc` 等 Python 缓存文件 |
 
 ## 配置方法
@@ -98,8 +98,11 @@ ipconfig /all
 
 ### 1.6 确认用户名和密码
 
-- **用户名**：命令行执行 `whoami`，反斜杠后面的就是用户名
+- **用户名**：命令行执行 `whoami`，反斜杠后面的就是用户名。用微软账户登录时通常就是邮箱前缀（例如 `DESKTOP-XXXX\12650` 里的 `12650`）
 - **密码**：Windows 登录密码（PIN 码不能用于远程关机）。如果只设了 PIN，去 **设置 → 账户 → 登录选项 → 密码 → 添加** 设置一个
+
+> **用微软账户（Microsoft Account）登录的电脑**：Samba 的 `net rpc shutdown` 仍然可以用"微软账户名 + 微软账户密码"通过 NTLM 认证，不必改成本地账户。
+> 但只要你在网页或系统设置里改了微软账户密码，`config.py` 里的 `PC_PASS` 就必须同步修改，并按 2.7 让容器重新读取配置，否则关机指令会报 `NT_STATUS_LOGON_FAILURE`。
 
 ---
 
@@ -123,6 +126,8 @@ ipconfig /all
 └── docker-compose.yml
 ```
 
+> `docker-compose.yml` 里用的是相对路径 `./config.py`，所以 `config.py` 必须和它放在**同一个目录**。容器启动时会把这个文件只读挂载到 `/app/config.py`。
+
 ### 2.3 修复权限（重要！）
 
 ```bash
@@ -133,9 +138,13 @@ chmod 755 .
 
 ### 2.4 一键构建启动
 
+首次部署需要构建镜像（要安装 `samba` 和 `paho-mqtt`，视网络几分钟）：
+
 ```bash
 docker compose up -d --build
 ```
+
+之后修改 `config.py` 就不用再构建了，直接 `docker compose restart` 即可（见 2.7）。
 
 ### 2.5 查看日志确认
 
@@ -158,6 +167,25 @@ docker compose stop                   # 停止
 docker compose down                   # 停止并删除容器
 docker compose pull && docker compose up -d  # 更新重启
 ```
+
+### 2.7 修改配置后怎么生效
+
+`config.py` 已经通过 `volumes` 只读挂载进容器（`./config.py:/app/config.py:ro`），容器读的是 NAS 磁盘上的文件，不是镜像里的副本。所以改配置只要：
+
+```bash
+# 1. 编辑 NAS 上的 config.py
+nano config.py
+
+# 2. 重启容器，让服务重新读取配置
+docker compose restart
+
+# 3. 确认日志
+docker compose logs --tail 20 wol-mqtt
+```
+
+只有首次部署，或者改动了 `wol.py` / `Dockerfile` / `requirements.txt` 时，才需要 `docker compose up -d --build`。
+
+> 旧版本没有挂载，`config.py` 是在构建时 `COPY` 进镜像的。改了磁盘上的配置却没重新构建，容器会一直用旧值——这就是"密码明明改了，`off` 却还是失败"的典型原因。
 
 ---
 
@@ -241,6 +269,40 @@ docker compose down
 docker compose build --no-cache
 docker compose up -d
 ```
+
+### 4.7 改了 Windows 密码后 `off` 失效？
+
+典型日志：
+```
+远程关机失败: Could not connect to server 192.168.3.2
+The username or password was not correct.
+Connection failed: NT_STATUS_LOGON_FAILURE
+```
+
+按顺序检查：
+
+1. `config.py` 里的 `PC_PASS` 是不是新密码
+2. 容器有没有读到新配置：`docker exec wol-mqtt grep PC_PASS /app/config.py`，值和磁盘上一致才算数
+3. 没挂载的旧部署：必须 `docker compose up -d --build` 重建镜像，`restart` 没用
+4. 在容器里直接验证凭据：
+   ```bash
+   docker exec wol-mqtt net rpc info -I 电脑IP -U 用户名%密码
+   ```
+   能返回 `Domain Name` 就说明账号密码可以通过 NTLM。
+
+### 4.8 容器变成 `Exited (137)` 且不会自己起来？
+
+`137` = 进程被 SIGKILL 杀掉，不一定是密码问题。先看状态和日志：
+
+```bash
+docker inspect wol-mqtt --format '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}} {{.RestartCount}}'
+docker logs --tail 50 wol-mqtt
+```
+
+- `RestartCount=0` 说明容器是被手动 `stop` 或重建时替换掉的，`restart: unless-stopped` 不会把它捞回来，重新 `docker compose up -d` 即可
+- `OOMKilled=true` 才是内存不足
+
+> 容器没在跑时，MQTT 根本没人订阅，发 `on` / `off` 都会"毫无反应"，很容易被误判成电脑或网络的问题。先 `docker ps` 确认 `wol-mqtt` 处于 `Up` 状态。
 
 ---
 
